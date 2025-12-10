@@ -2,6 +2,8 @@
 
 A True Random Number Generator built with an RP2040 microcontroller, harvesting entropy from electromagnetic noise, photon detection, and timing jitter.
 
+![1024-1365](https://github.com/user-attachments/assets/8d8a3bd9-1adb-4c64-99e3-edc3b046c54f)
+
 ## How It Works
 
 EMPHarvest combines multiple independent physical entropy sources:
