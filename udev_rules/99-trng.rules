@@ -1,0 +1,2 @@
+ACTION=="add", SUBSYSTEM=="tty", ATTRS{idVendor}=="2e8a", ATTRS{idProduct}=="0003", SYMLINK+="trng", TAG+="systemd", ENV{SYSTEMD_WANTS}="trng-entropy.service", RUN+="/bin/stty -F /dev/%k 115200 raw -echo"
+

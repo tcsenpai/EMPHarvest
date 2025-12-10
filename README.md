@@ -258,6 +258,153 @@ Even after mixing multiple entropy sources, subtle correlations may remain — p
 
 The avalanche effect ensures that similar inputs produce completely different outputs. Two inputs differing by one bit will have outputs differing by approximately 50% of bits, with no predictable pattern.
 
+## System Integration (Linux)
+
+You can configure your Linux system to automatically feed entropy from the TRNG device to the kernel's random pool using `rngd`. This requires installing a udev rule and a systemd service.
+
+### Finding Your Device's Vendor and Product ID
+
+**Important**: The vendor and product ID vary depending on your specific RP2040 board. The provided files use `2e8a:0003` (Raspberry Pi Pico), but your board may differ.
+
+To find your device's IDs:
+
+1. Connect your TRNG device via USB
+2. Run one of these commands:
+
+```bash
+# Method 1: lsusb
+lsusb | grep -i "pico\|rp2040\|raspberry"
+
+# Method 2: udevadm (more detailed)
+# First find your device (usually /dev/ttyACM0)
+udevadm info -a -n /dev/ttyACM0 | grep -E "idVendor|idProduct"
+
+# Method 3: Check dmesg after plugging in
+dmesg | tail -20
+```
+
+Example output from `lsusb`:
+```
+Bus 001 Device 005: ID 2e8a:0003 Raspberry Pi Pico
+                       ^^^^:^^^^
+                       Vendor:Product
+```
+
+Common RP2040 board IDs:
+| Board | Vendor ID | Product ID |
+|-------|-----------|------------|
+| Raspberry Pi Pico | 2e8a | 0003 |
+| Waveshare RP2040-Zero | 2e8a | 0003 |
+| Adafruit Feather RP2040 | 239a | 80f4 |
+| Seeed XIAO RP2040 | 2e8a | 000a |
+
+### Installing the udev Rule
+
+The udev rule creates a `/dev/trng` symlink when your device is plugged in and automatically starts the entropy service.
+
+1. Copy the rule file:
+```bash
+sudo cp udev_rules/99-trng.rules /etc/udev/rules.d/
+```
+
+2. **Edit the rule if your device has different IDs**:
+```bash
+sudo nano /etc/udev/rules.d/99-trng.rules
+```
+
+Replace `idVendor` and `idProduct` values with your device's IDs:
+```
+ACTION=="add", SUBSYSTEM=="tty", ATTRS{idVendor}=="YOUR_VENDOR_ID", ATTRS{idProduct}=="YOUR_PRODUCT_ID", SYMLINK+="trng", TAG+="systemd", ENV{SYSTEMD_WANTS}="trng-entropy.service", RUN+="/bin/stty -F /dev/%k 115200 raw -echo"
+```
+
+3. Reload udev rules:
+```bash
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+```
+
+4. Verify the symlink (after plugging in the device):
+```bash
+ls -la /dev/trng
+```
+
+### Installing the Systemd Service
+
+The service uses `rngd` to feed entropy from `/dev/trng` to the kernel's random pool.
+
+1. Install rng-tools if not already installed:
+```bash
+# Debian/Ubuntu
+sudo apt install rng-tools
+
+# Fedora
+sudo dnf install rng-tools
+
+# Arch
+sudo pacman -S rng-tools
+```
+
+2. Copy the service file:
+```bash
+sudo cp service/trng-entropy.service /etc/systemd/system/
+```
+
+3. Reload systemd:
+```bash
+sudo systemctl daemon-reload
+```
+
+4. The service starts automatically when the device is plugged in (via the udev rule). To check status:
+```bash
+sudo systemctl status trng-entropy.service
+```
+
+5. To manually start/stop:
+```bash
+sudo systemctl start trng-entropy.service
+sudo systemctl stop trng-entropy.service
+```
+
+### Verifying the Setup
+
+1. Check that the device is recognized:
+```bash
+ls -la /dev/trng
+# Should show: /dev/trng -> ttyACM0 (or similar)
+```
+
+2. Check that the service is running:
+```bash
+sudo systemctl status trng-entropy.service
+```
+
+3. Monitor entropy being added:
+```bash
+# Watch the kernel entropy pool
+watch cat /proc/sys/kernel/random/entropy_avail
+
+# Check rngd activity
+journalctl -u trng-entropy.service -f
+```
+
+### Uninstalling
+
+To remove the system integration:
+
+```bash
+# Stop and disable the service
+sudo systemctl stop trng-entropy.service
+sudo systemctl disable trng-entropy.service
+
+# Remove files
+sudo rm /etc/systemd/system/trng-entropy.service
+sudo rm /etc/udev/rules.d/99-trng.rules
+
+# Reload configurations
+sudo systemctl daemon-reload
+sudo udevadm control --reload-rules
+```
+
 ## Security Considerations
 
 EMPHarvest is suitable for:
