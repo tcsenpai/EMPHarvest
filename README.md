@@ -260,79 +260,101 @@ The avalanche effect ensures that similar inputs produce completely different ou
 
 ## System Integration (Linux)
 
-You can configure your Linux system to automatically feed entropy from the TRNG device to the kernel's random pool using `rngd`. This requires installing a udev rule and a systemd service.
+This section explains how to:
+1. Flash the firmware with a custom USB identity (so your system recognizes it as "Empharvest TRNG")
+2. Set up automatic entropy feeding to the kernel's random pool
 
-### Finding Your Device's Vendor and Product ID
+---
 
-**Important**: The vendor and product ID vary depending on your specific RP2040 board. The provided files use `2e8a:0003` (Raspberry Pi Pico), but your board may differ.
+### ⚠️ IMPORTANT: Read This First
 
-To find your device's IDs:
+The provided configuration files are **specifically designed for the Waveshare RP2040-Zero** board with a custom USB Vendor ID (`1209`) and Product ID (`241e`) from [pid.codes](https://pid.codes/).
 
-1. Connect your TRNG device via USB
-2. Run one of these commands:
+**If you are using a Waveshare RP2040-Zero**: Follow all steps below.
+
+**If you are using ANY OTHER board** (Raspberry Pi Pico, Adafruit, Seeed, etc.):
+- **DO NOT** copy `boards.local.txt` unless you modify it for your specific board
+- **DO** edit the udev rule to match your board's default VID/PID (see "For Other Boards" section below)
+
+---
+
+### Step 1: Install the Custom Board Definition (Waveshare RP2040-Zero ONLY)
+
+The `boards.local.txt` file defines a custom board called "Empharvest TRNG" that will be flashed with a unique USB identity. **This must be done BEFORE flashing the firmware** because the VID/PID are baked into the firmware during compilation.
+
+#### 1.1 Find your Arduino RP2040 package version
 
 ```bash
-# Method 1: lsusb
-lsusb | grep -i "pico\|rp2040\|raspberry"
-
-# Method 2: udevadm (more detailed)
-# First find your device (usually /dev/ttyACM0)
-udevadm info -a -n /dev/ttyACM0 | grep -E "idVendor|idProduct"
-
-# Method 3: Check dmesg after plugging in
-dmesg | tail -20
+ls ~/.arduino15/packages/rp2040/hardware/rp2040/
 ```
 
-Example output from `lsusb`:
-```
-Bus 001 Device 005: ID 2e8a:0003 Raspberry Pi Pico
-                       ^^^^:^^^^
-                       Vendor:Product
-```
+This will show something like `5.4.3` or another version number. Note this number.
 
-Common RP2040 board IDs:
-| Board | Vendor ID | Product ID |
-|-------|-----------|------------|
-| Raspberry Pi Pico | 2e8a | 0003 |
-| Waveshare RP2040-Zero | 2e8a | 0003 |
-| Adafruit Feather RP2040 | 239a | 80f4 |
-| Seeed XIAO RP2040 | 2e8a | 000a |
+#### 1.2 Copy the board definition
 
-### Installing the udev Rule
+Replace `5.4.3` with your actual version number:
 
-The udev rule creates a `/dev/trng` symlink when your device is plugged in and automatically starts the entropy service.
-
-1. Copy the rule file:
 ```bash
-sudo cp udev_rules/99-trng.rules /etc/udev/rules.d/
+cp boards.local.txt ~/.arduino15/packages/rp2040/hardware/rp2040/5.4.3/
 ```
 
-2. **Edit the rule if your device has different IDs**:
+#### 1.3 Restart Arduino IDE
+
+Close and reopen Arduino IDE completely. The new board will now appear in the board list.
+
+#### 1.4 Select the new board and flash
+
+1. Go to **Tools → Board → Raspberry Pi RP2040 Boards**
+2. Select **"Empharvest TRNG"** (this is the new custom board)
+3. Hold the **BOOT** button on your RP2040-Zero, connect USB, release BOOT
+4. Click **Upload**
+
+After flashing, your device will identify itself as:
+- **Vendor**: Demos Network (VID: `1209`)
+- **Product**: Empharvest (PID: `241e`)
+
+You can verify this with:
 ```bash
-sudo nano /etc/udev/rules.d/99-trng.rules
+lsusb | grep -i "1209"
+# Should show: ID 1209:241e Demos Network Empharvest
 ```
 
-Replace `idVendor` and `idProduct` values with your device's IDs:
-```
-ACTION=="add", SUBSYSTEM=="tty", ATTRS{idVendor}=="YOUR_VENDOR_ID", ATTRS{idProduct}=="YOUR_PRODUCT_ID", SYMLINK+="trng", TAG+="systemd", ENV{SYSTEMD_WANTS}="trng-entropy.service", RUN+="/bin/stty -F /dev/%k 115200 raw -echo"
+---
+
+### Step 2: Install the udev Rule
+
+The udev rule creates a `/dev/emph` symlink when your device is plugged in and automatically starts the entropy service.
+
+#### 2.1 Copy the rule file
+
+```bash
+sudo cp udev_rules/99-emph.rules /etc/udev/rules.d/
 ```
 
-3. Reload udev rules:
+#### 2.2 Reload udev rules
+
 ```bash
 sudo udevadm control --reload-rules
 sudo udevadm trigger
 ```
 
-4. Verify the symlink (after plugging in the device):
+#### 2.3 Verify the symlink
+
+Unplug and replug your device, then:
+
 ```bash
-ls -la /dev/trng
+ls -la /dev/emph
+# Should show: /dev/emph -> ttyACM0 (or similar)
 ```
 
-### Installing the Systemd Service
+---
 
-The service uses `rngd` to feed entropy from `/dev/trng` to the kernel's random pool.
+### Step 3: Install the Systemd Service
 
-1. Install rng-tools if not already installed:
+The service uses `rngd` to continuously feed entropy from `/dev/emph` to the kernel's random pool.
+
+#### 3.1 Install rng-tools
+
 ```bash
 # Debian/Ubuntu
 sudo apt install rng-tools
@@ -344,65 +366,139 @@ sudo dnf install rng-tools
 sudo pacman -S rng-tools
 ```
 
-2. Copy the service file:
+#### 3.2 Copy the service file
+
 ```bash
-sudo cp service/trng-entropy.service /etc/systemd/system/
+sudo cp service/empharvester.service /etc/systemd/system/
 ```
 
-3. Reload systemd:
+#### 3.3 Reload systemd
+
 ```bash
 sudo systemctl daemon-reload
 ```
 
-4. The service starts automatically when the device is plugged in (via the udev rule). To check status:
+#### 3.4 Verify it works
+
+The service starts automatically when the device is plugged in. Check status:
+
 ```bash
-sudo systemctl status trng-entropy.service
+sudo systemctl status empharvester.service
 ```
 
-5. To manually start/stop:
+To manually start/stop:
+
 ```bash
-sudo systemctl start trng-entropy.service
-sudo systemctl stop trng-entropy.service
+sudo systemctl start empharvester.service
+sudo systemctl stop empharvester.service
 ```
 
-### Verifying the Setup
+---
 
-1. Check that the device is recognized:
-```bash
-ls -la /dev/trng
-# Should show: /dev/trng -> ttyACM0 (or similar)
-```
+### Step 4: Verify Everything Works
 
-2. Check that the service is running:
-```bash
-sudo systemctl status trng-entropy.service
-```
+1. **Check the symlink exists**:
+   ```bash
+   ls -la /dev/emph
+   ```
 
-3. Monitor entropy being added:
-```bash
-# Watch the kernel entropy pool
-watch cat /proc/sys/kernel/random/entropy_avail
+2. **Check the service is running**:
+   ```bash
+   sudo systemctl status empharvester.service
+   ```
 
-# Check rngd activity
-journalctl -u trng-entropy.service -f
-```
+3. **Monitor entropy being added**:
+   ```bash
+   # Watch the kernel entropy pool (number should increase)
+   watch cat /proc/sys/kernel/random/entropy_avail
+
+   # Check rngd activity logs
+   journalctl -u empharvester.service -f
+   ```
+
+---
+
+### For Other Boards (NOT Waveshare RP2040-Zero)
+
+If you're using a different RP2040 board (Raspberry Pi Pico, Adafruit, Seeed XIAO, etc.), you have two options:
+
+#### Option A: Use your board's default VID/PID (Easiest)
+
+**Skip** the `boards.local.txt` installation entirely. Instead:
+
+1. **Find your device's VID/PID**:
+   ```bash
+   # Plug in your device, then run:
+   lsusb | grep -i "pico\|rp2040\|raspberry"
+
+   # Or for more detail:
+   udevadm info -a -n /dev/ttyACM0 | grep -E "idVendor|idProduct"
+   ```
+
+   Example output:
+   ```
+   Bus 001 Device 005: ID 2e8a:0003 Raspberry Pi Pico
+                          ^^^^:^^^^
+                          VID  :PID
+   ```
+
+2. **Edit the udev rule** to match your VID/PID:
+   ```bash
+   sudo nano /etc/udev/rules.d/99-emph.rules
+   ```
+
+   Change the `idVendor` and `idProduct` values:
+   ```
+   ACTION=="add", SUBSYSTEM=="tty", ATTRS{idVendor}=="YOUR_VID", ATTRS{idProduct}=="YOUR_PID", SYMLINK+="emph", TAG+="systemd", ENV{SYSTEMD_WANTS}="empharvester.service", RUN+="/bin/stty -F /dev/%k 115200 raw -echo"
+   ```
+
+   For example, for a Raspberry Pi Pico:
+   ```
+   ATTRS{idVendor}=="2e8a", ATTRS{idProduct}=="0003"
+   ```
+
+3. **Continue with Steps 2 and 3** above (udev and service installation).
+
+#### Option B: Create a custom board definition (Advanced)
+
+If you want your device to have the custom "Empharvest" USB identity:
+
+1. **Edit `boards.local.txt`** before copying:
+   - Change `empharvest.build.variant=waveshare_rp2040_zero` to match your board's variant
+   - Find your board's variant name in `~/.arduino15/packages/rp2040/hardware/rp2040/VERSION/boards.txt`
+
+2. **Follow all steps** in this guide normally.
+
+#### Common Board VID/PID Reference
+
+| Board | Vendor ID | Product ID |
+|-------|-----------|------------|
+| Raspberry Pi Pico | 2e8a | 0003 |
+| Waveshare RP2040-Zero (default) | 2e8a | 0003 |
+| **Empharvest custom (this project)** | **1209** | **241e** |
+| Adafruit Feather RP2040 | 239a | 80f4 |
+| Seeed XIAO RP2040 | 2e8a | 000a |
+
+---
 
 ### Uninstalling
 
 To remove the system integration:
 
 ```bash
-# Stop and disable the service
-sudo systemctl stop trng-entropy.service
-sudo systemctl disable trng-entropy.service
+# Stop the service
+sudo systemctl stop empharvester.service
 
 # Remove files
-sudo rm /etc/systemd/system/trng-entropy.service
-sudo rm /etc/udev/rules.d/99-trng.rules
+sudo rm /etc/systemd/system/empharvester.service
+sudo rm /etc/udev/rules.d/99-emph.rules
 
 # Reload configurations
 sudo systemctl daemon-reload
 sudo udevadm control --reload-rules
+
+# Optional: Remove the custom board definition
+rm ~/.arduino15/packages/rp2040/hardware/rp2040/VERSION/boards.local.txt
 ```
 
 ## Security Considerations

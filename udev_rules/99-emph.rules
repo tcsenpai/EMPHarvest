@@ -1,0 +1,2 @@
+ACTION=="add", SUBSYSTEM=="tty", ATTRS{idVendor}=="1209", ATTRS{idProduct}=="241e", SYMLINK+="emph", TAG+="systemd", ENV{SYSTEMD_WANTS}="empharvester.service", RUN+="/bin/stty -F /dev/%k 115200 raw -echo"
+

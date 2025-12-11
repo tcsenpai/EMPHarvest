@@ -1,0 +1,13 @@
+[Unit]
+Description=TRNG Entropy Feeder for EMPHarvester
+BindsTo=dev-emph.device
+After=dev-emph.device
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/rngd -f -r /dev/emph -o /dev/random
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=dev-emph.device
